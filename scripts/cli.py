@@ -92,12 +92,19 @@ def _headless_fallback(port: int) -> None:
 
 def cmd_check_login(args: argparse.Namespace) -> None:
     """检查登录状态。"""
-    from xhs.login import check_login_status
+    from xhs.login import check_login_status, get_current_user_info
 
     browser, page = _connect(args)
     try:
         logged_in = check_login_status(page)
-        _output({"logged_in": logged_in}, exit_code=0 if logged_in else 1)
+        if logged_in:
+            user_info = get_current_user_info(page)
+            result: dict = {"logged_in": True}
+            if user_info:
+                result["user"] = user_info.to_dict()
+            _output(result)
+        else:
+            _output({"logged_in": False}, exit_code=1)
     finally:
         browser.close_page(page)
         browser.close()
@@ -105,13 +112,17 @@ def cmd_check_login(args: argparse.Namespace) -> None:
 
 def cmd_login(args: argparse.Namespace) -> None:
     """获取登录二维码并等待扫码。"""
-    from xhs.login import fetch_qrcode, save_qrcode_to_file, wait_for_login
+    from xhs.login import fetch_qrcode, get_current_user_info, save_qrcode_to_file, wait_for_login
 
     browser, page = _connect(args)
     try:
         src, already = fetch_qrcode(page)
         if already:
-            _output({"logged_in": True, "message": "已登录"})
+            user_info = get_current_user_info(page)
+            result: dict = {"logged_in": True, "message": "已登录"}
+            if user_info:
+                result["user"] = user_info.to_dict()
+            _output(result)
         else:
             # 保存二维码到临时文件
             qrcode_path = save_qrcode_to_file(src)
@@ -125,10 +136,14 @@ def cmd_login(args: argparse.Namespace) -> None:
                 )
             )
             success = wait_for_login(page, timeout=120)
-            _output(
-                {"logged_in": success, "message": "登录成功" if success else "登录超时"},
-                exit_code=0 if success else 2,
-            )
+            if success:
+                user_info = get_current_user_info(page)
+                result = {"logged_in": True, "message": "登录成功"}
+                if user_info:
+                    result["user"] = user_info.to_dict()
+                _output(result)
+            else:
+                _output({"logged_in": False, "message": "登录超时"}, exit_code=2)
     finally:
         browser.close_page(page)
         browser.close()
