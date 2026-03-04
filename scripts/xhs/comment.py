@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 from .cdp import Page
@@ -11,8 +12,12 @@ from .selectors import (
     COMMENT_INPUT_FIELD,
     COMMENT_INPUT_TRIGGER,
     COMMENT_SUBMIT_BUTTON,
+    COMMENT_VARIANTS,
+    COMMENTS_CONTAINER,
     PARENT_COMMENT,
     REPLY_BUTTON,
+    make_comment_id_selector,
+    make_reply_selector,
 )
 from .urls import make_feed_detail_url
 
@@ -105,7 +110,7 @@ def reply_comment(
     sleep_random(800, 1500)
 
     # 点击回复按钮
-    reply_selector = f"#comment-{comment_id} {REPLY_BUTTON}" if comment_id else REPLY_BUTTON
+    reply_selector = make_reply_selector(comment_id) if comment_id else REPLY_BUTTON
     page.click_element(reply_selector)
     sleep_random(800, 1500)
 
@@ -131,7 +136,7 @@ def _find_and_scroll_to_comment(
     logger.info("开始查找评论 - commentID: %s, userID: %s", comment_id, user_id)
 
     # 先滚动到评论区
-    page.scroll_element_into_view(".comments-container")
+    page.scroll_element_into_view(COMMENTS_CONTAINER)
     sleep_random(800, 1500)
 
     last_count = 0
@@ -165,10 +170,10 @@ def _find_and_scroll_to_comment(
 
         # 通过 commentID 查找
         if comment_id:
-            selector = f"#comment-{comment_id}"
-            if page.has_element(selector):
+            cid_selector = make_comment_id_selector(comment_id)
+            if page.has_element(cid_selector):
                 logger.info("通过 commentID 找到评论 (尝试 %d 次)", attempt + 1)
-                page.scroll_element_into_view(selector)
+                page.scroll_element_into_view(cid_selector)
                 return True
 
         # 通过 userID 查找
@@ -177,7 +182,7 @@ def _find_and_scroll_to_comment(
                 f"""
                 (() => {{
                     const els = document.querySelectorAll(
-                        '.parent-comment, .comment-item, .comment'
+                        {json.dumps(COMMENT_VARIANTS)}
                     );
                     for (const el of els) {{
                         if (el.querySelector('[data-user-id="{user_id}"]')) {{
@@ -198,8 +203,3 @@ def _find_and_scroll_to_comment(
     return False
 
 
-def _js_str(s: str) -> str:
-    """将 Python 字符串转为 JS 字面量（含引号）。"""
-    import json
-
-    return json.dumps(s)

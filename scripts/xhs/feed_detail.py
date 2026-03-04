@@ -31,10 +31,12 @@ from .human import (
 )
 from .selectors import (
     ACCESS_ERROR_WRAPPER,
+    COMMENTS_CONTAINER,
     END_CONTAINER,
     NO_COMMENTS_TEXT,
     PARENT_COMMENT,
     SHOW_MORE_BUTTON,
+    TOTAL_COMMENT,
 )
 from .types import (
     CommentList,
@@ -375,7 +377,7 @@ def _human_scroll(
 def _scroll_to_comments_area(page: Page) -> None:
     """滚动到评论区。"""
     logger.info("滚动到评论区...")
-    page.scroll_element_into_view(".comments-container")
+    page.scroll_element_into_view(COMMENTS_CONTAINER)
     time.sleep(0.5)
     # 触发懒加载
     page.dispatch_wheel_event(100)
@@ -398,7 +400,7 @@ def _get_comment_count(page: Page) -> int:
 
 def _get_total_comment_count(page: Page) -> int:
     """获取总评论数（从 "共N条评论" 提取）。"""
-    text = page.get_element_text(".comments-container .total")
+    text = page.get_element_text(TOTAL_COMMENT)
     if not text:
         return 0
     match = _TOTAL_COMMENT_RE.search(text)

@@ -11,10 +11,16 @@ import time
 from .cdp import Page
 from .errors import ContentTooLongError, PublishError, TitleTooLongError, UploadTimeoutError
 from .selectors import (
+    CHECKBOX_INPUT,
     CONTENT_EDITOR,
     CONTENT_LENGTH_ERROR,
+    CONTENT_TEXTBOX,
     CREATOR_TAB,
+    CREATOR_TAB_TITLE,
+    CUSTOM_BUTTON,
+    D_CHECKBOX_INPUT,
     DATETIME_INPUT,
+    DIALOG_FOOTER,
     FILE_INPUT,
     IMAGE_PREVIEW,
     ORIGINAL_SWITCH,
@@ -26,7 +32,6 @@ from .selectors import (
     TAG_TOPIC_CONTAINER,
     TITLE_INPUT,
     TITLE_MAX_SUFFIX,
-    UPLOAD_CONTENT,
     UPLOAD_INPUT,
     VISIBILITY_DROPDOWN,
     VISIBILITY_OPTIONS,
@@ -124,17 +129,17 @@ def click_publish_button(page: Page) -> None:
 def save_as_draft(page: Page) -> None:
     """点击「暂存离开」按钮保存草稿。"""
     clicked = page.evaluate(
-        """
-        (() => {
-            const buttons = document.querySelectorAll('button.custom-button');
-            for (const btn of buttons) {
-                if (btn.textContent.trim() === '暂存离开') {
+        f"""
+        (() => {{
+            const buttons = document.querySelectorAll({json.dumps(CUSTOM_BUTTON)});
+            for (const btn of buttons) {{
+                if (btn.textContent.trim() === '暂存离开') {{
                     btn.click();
                     return true;
-                }
-            }
+                }}
+            }}
             return false;
-        })()
+        }})()
         """
     )
     if clicked:
@@ -168,9 +173,10 @@ def _click_publish_tab(page: Page, tab_name: str) -> None:
                 // 策略1: 查找 div.creator-tab（过滤隐藏元素）
                 let tabs = document.querySelectorAll({json.dumps(CREATOR_TAB)});
                 for (const tab of tabs) {{
-                    const titleSpan = tab.querySelector('span.title');
-                    const tabText = titleSpan ? titleSpan.textContent.trim() : tab.textContent.trim();
-                    if (tabText === {json.dumps(tab_name)}) {{
+                    const titleSpan = tab.querySelector({json.dumps(CREATOR_TAB_TITLE)});
+                    const txt = titleSpan ? titleSpan.textContent.trim()
+                        : tab.textContent.trim();
+                    if (txt === {json.dumps(tab_name)}) {{
                         const rect = tab.getBoundingClientRect();
                         const style = window.getComputedStyle(tab);
                         // 跳过隐藏或被移出视口的元素
@@ -187,21 +193,23 @@ def _click_publish_tab(page: Page, tab_name: str) -> None:
                         return 'blocked';
                     }}
                 }}
-                
+
                 // 策略2: 查找任意包含目标文本的元素
                 const allElements = document.querySelectorAll('*');
                 for (const el of allElements) {{
-                    if (el.children.length === 0 && el.textContent.trim() === {json.dumps(tab_name)}) {{
+                    const t = el.textContent.trim();
+                    if (el.children.length === 0 && t === {json.dumps(tab_name)}) {{
                         const rect = el.getBoundingClientRect();
                         const style = window.getComputedStyle(el);
                         if (rect.width === 0 || rect.height === 0) continue;
                         if (rect.left < 0 || rect.top < 0) continue;
-                        if (style.display === 'none' || style.visibility === 'hidden') continue;
+                        if (style.display === 'none') continue;
+                        if (style.visibility === 'hidden') continue;
                         el.click();
                         return 'clicked';
                     }}
                 }}
-                
+
                 return 'not_found';
             }})()
             """
@@ -390,7 +398,7 @@ def _find_content_element(page: Page) -> str:
         """
     )
     if found == "found":
-        return "[role='textbox']"
+        return CONTENT_TEXTBOX
 
     raise PublishError("没有找到内容输入框")
 
@@ -555,7 +563,7 @@ def _set_original(page: Page) -> None:
                 if (!card.textContent.includes('原创声明')) continue;
                 const sw = card.querySelector({json.dumps(ORIGINAL_SWITCH)});
                 if (!sw) continue;
-                const input = sw.querySelector('input[type="checkbox"]');
+                const input = sw.querySelector({json.dumps(CHECKBOX_INPUT)});
                 if (input && input.checked) return 'already_on';
                 sw.click();
                 return 'clicked';
@@ -584,40 +592,40 @@ def _confirm_original_declaration(page: Page) -> None:
 
     # 勾选 checkbox
     page.evaluate(
-        """
-        (() => {
-            const footers = document.querySelectorAll('div.footer');
-            for (const footer of footers) {
+        f"""
+        (() => {{
+            const footers = document.querySelectorAll({json.dumps(DIALOG_FOOTER)});
+            for (const footer of footers) {{
                 if (!footer.textContent.includes('原创声明须知')) continue;
-                const cb = footer.querySelector('div.d-checkbox input[type="checkbox"]');
+                const cb = footer.querySelector({json.dumps(D_CHECKBOX_INPUT)});
                 if (cb && !cb.checked) cb.click();
                 return;
-            }
-        })()
+            }}
+        }})()
         """
     )
     time.sleep(0.5)
 
     # 点击声明原创按钮
     result = page.evaluate(
-        """
-        (() => {
-            const footers = document.querySelectorAll('div.footer');
-            for (const footer of footers) {
+        f"""
+        (() => {{
+            const footers = document.querySelectorAll({json.dumps(DIALOG_FOOTER)});
+            for (const footer of footers) {{
                 if (!footer.textContent.includes('声明原创')) continue;
-                const btn = footer.querySelector('button.custom-button');
-                if (btn) {
-                    if (btn.classList.contains('disabled') || btn.disabled) {
-                        const cb = footer.querySelector('div.d-checkbox input[type="checkbox"]');
+                const btn = footer.querySelector({json.dumps(CUSTOM_BUTTON)});
+                if (btn) {{
+                    if (btn.classList.contains('disabled') || btn.disabled) {{
+                        const cb = footer.querySelector({json.dumps(D_CHECKBOX_INPUT)});
                         if (cb && !cb.checked) cb.click();
                         return 'button_disabled';
-                    }
+                    }}
                     btn.click();
                     return 'clicked';
-                }
-            }
+                }}
+            }}
             return 'button_not_found';
-        })()
+        }})()
         """
     )
 

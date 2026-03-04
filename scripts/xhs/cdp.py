@@ -395,13 +395,30 @@ class Page:
             {"nodeId": node_id, "files": files},
         )
 
-    def dispatch_wheel_event(self, delta_y: float) -> None:
-        """触发滚轮事件以激活懒加载。"""
+    def dispatch_wheel_event(
+        self,
+        delta_y: float,
+        scroll_targets: list[str] | None = None,
+    ) -> None:
+        """触发滚轮事件以激活懒加载。
+
+        Args:
+            delta_y: 滚轮增量。
+            scroll_targets: 候选滚动容器选择器列表（按优先级），
+                            默认使用 selectors.NOTE_SCROLLER / INTERACTION_CONTAINER。
+        """
+        if scroll_targets is None:
+            from .selectors import INTERACTION_CONTAINER, NOTE_SCROLLER
+
+            scroll_targets = [NOTE_SCROLLER, INTERACTION_CONTAINER]
+
+        fallback_chain = " || ".join(
+            f"document.querySelector({json.dumps(s)})" for s in scroll_targets
+        )
         self.evaluate(
             f"""
             (() => {{
-                let target = document.querySelector('.note-scroller')
-                    || document.querySelector('.interaction-container')
+                let target = {fallback_chain}
                     || document.documentElement;
                 const event = new WheelEvent('wheel', {{
                     deltaY: {delta_y},
