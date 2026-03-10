@@ -541,8 +541,9 @@ class Page:
                 return b""
             box_model = self._send_session("DOM.getBoxModel", {"nodeId": node_id})
             model = box_model["model"]
-            content = model["content"]  # [x1,y1, x2,y2, x3,y3, x4,y4] 顺时针四角
-            x, y = content[0], content[1]
+            # border quad 包含 padding，与 model width/height 一致
+            border = model["border"]  # [x1,y1, x2,y2, x3,y3, x4,y4]
+            x, y = border[0], border[1]
             width, height = float(model["width"]), float(model["height"])
         except Exception:
             return b""
