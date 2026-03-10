@@ -162,11 +162,17 @@ def launch_chrome(
         logger.info("使用代理: %s", _mask_proxy(proxy))
 
     logger.info("启动 Chrome: port=%d, headless=%s, profile=%s", port, headless, user_data_dir)
-    process = subprocess.Popen(
-        args,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    popen_kwargs: dict = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    # Linux/macOS: 新建 session 使 Chrome 脱离 CLI 进程组，
+    # CLI 退出后 Chrome 不会收到 SIGHUP/EOF 而意外终止。
+    if sys.platform != "win32":
+        popen_kwargs["start_new_session"] = True
+
+    process = subprocess.Popen(args, **popen_kwargs)
     _chrome_process = process
 
     # 等待 Chrome 准备就绪

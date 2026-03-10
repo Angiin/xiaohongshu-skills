@@ -128,8 +128,22 @@ def fetch_qrcode(page: Page) -> tuple[bytes, bool]:
     # 等待二维码元素出现
     page.wait_for_element(QRCODE_IMG, timeout=15.0)
 
-    # CDP 截图二维码元素，padding=20 增加白边提升对比度
-    png_bytes = page.screenshot_element(QRCODE_IMG, padding=20)
+    # 注入白色背景 + CSS padding，使截图自带白边
+    # （直接用 clip padding 会截到登录弹窗的深色背景）
+    _margin = 20
+    page.evaluate(
+        f"""(() => {{
+            const el = document.querySelector({json.dumps(QRCODE_IMG)});
+            if (el) {{
+                el.style.padding = '{_margin}px';
+                el.style.backgroundColor = 'white';
+                el.style.boxSizing = 'content-box';
+            }}
+        }})()"""
+    )
+
+    # 截图（不额外加 padding，白边已由 CSS 提供）
+    png_bytes = page.screenshot_element(QRCODE_IMG)
     if not png_bytes:
         raise RuntimeError("二维码截图失败")
 
