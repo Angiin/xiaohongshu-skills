@@ -15,6 +15,7 @@ import os
 import sys
 import tempfile
 
+
 def _session_tab_file(port: int) -> str:
     """返回指定端口的 session tab 文件路径（每账号独立隔离）。"""
     return os.path.join(tempfile.gettempdir(), "xhs", f"session_tab_{port}.txt")
@@ -62,6 +63,7 @@ def _clear_session_tab(port: int) -> None:
     with contextlib.suppress(FileNotFoundError):
         os.remove(_session_tab_file(port))
 
+
 # Windows 控制台默认编码（如 cp1252）不支持中文，强制 UTF-8
 if sys.stdout and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -79,28 +81,6 @@ def _output(data: dict, exit_code: int = 0) -> None:
     """输出 JSON 并退出。"""
     print(json.dumps(data, ensure_ascii=False, indent=2))
     sys.exit(exit_code)
-
-
-def _open_file_if_display(path: str) -> None:
-    """有桌面环境时用系统默认程序打开文件，无界面环境静默跳过。"""
-    from chrome_launcher import has_display
-
-    if not has_display():
-        return
-
-    import platform
-    import subprocess
-
-    try:
-        system = platform.system()
-        if system == "Windows":
-            os.startfile(path)
-        elif system == "Darwin":
-            subprocess.Popen(["open", path])
-        else:
-            subprocess.Popen(["xdg-open", path])
-    except Exception:
-        logger.debug("无法自动打开文件: %s", path)
 
 
 def _update_account_nickname(args: argparse.Namespace, page) -> None:
@@ -147,9 +127,22 @@ def _connect(args: argparse.Namespace):
 
     user_data_dir = _resolve_account(args)
 
-    if not ensure_chrome(port=args.port, headless=not has_display(), user_data_dir=user_data_dir):
+    try:
+        chrome_ok = ensure_chrome(
+            port=args.port,
+            headless=not has_display(),
+            user_data_dir=user_data_dir,
+        )
+    except RuntimeError as e:
+        _output({"success": False, "error": str(e)}, exit_code=2)
+        return  # unreachable, _output calls sys.exit
+
+    if not chrome_ok:
         _output(
-            {"success": False, "error": "无法启动 Chrome，请检查 Chrome 是否已安装"},
+            {
+                "success": False,
+                "error": "未找到 Chrome，请安装 Google Chrome 或设置 CHROME_BIN 环境变量",
+            },
             exit_code=2,
         )
 
@@ -178,8 +171,24 @@ def _connect_saved_tab(args: argparse.Namespace):
 
     user_data_dir = _resolve_account(args)
 
-    if not ensure_chrome(port=args.port, headless=not has_display(), user_data_dir=user_data_dir):
-        _output({"success": False, "error": "无法连接到 Chrome"}, exit_code=2)
+    try:
+        chrome_ok = ensure_chrome(
+            port=args.port,
+            headless=not has_display(),
+            user_data_dir=user_data_dir,
+        )
+    except RuntimeError as e:
+        _output({"success": False, "error": str(e)}, exit_code=2)
+        return
+
+    if not chrome_ok:
+        _output(
+            {
+                "success": False,
+                "error": "未找到 Chrome，请安装 Google Chrome 或设置 CHROME_BIN 环境变量",
+            },
+            exit_code=2,
+        )
 
     browser = Browser(host=args.host, port=args.port)
     browser.connect()
@@ -207,9 +216,22 @@ def _connect_existing(args: argparse.Namespace):
 
     user_data_dir = _resolve_account(args)
 
-    if not ensure_chrome(port=args.port, headless=not has_display(), user_data_dir=user_data_dir):
+    try:
+        chrome_ok = ensure_chrome(
+            port=args.port,
+            headless=not has_display(),
+            user_data_dir=user_data_dir,
+        )
+    except RuntimeError as e:
+        _output({"success": False, "error": str(e)}, exit_code=2)
+        return
+
+    if not chrome_ok:
         _output(
-            {"success": False, "error": "无法连接到 Chrome"},
+            {
+                "success": False,
+                "error": "未找到 Chrome，请安装 Google Chrome 或设置 CHROME_BIN 环境变量",
+            },
             exit_code=2,
         )
 
@@ -251,46 +273,37 @@ def _headless_fallback(port: int) -> None:
             exit_code=1,
         )
 
+
 def _qrcode_fallback(browser, page, args: argparse.Namespace) -> None:
     """频率限制时刷新页面返回二维码，让 AI 直接展示给用户扫码。"""
-    from xhs.login import (
-        fetch_qrcode,
-        make_qrcode_url,
-        save_qrcode_to_file,
-    )
+    from xhs.login import fetch_qrcode, save_qrcode_to_file
     from xhs.urls import EXPLORE_URL
 
     # 刷新页面使登录弹窗回到默认的二维码 tab
     page.navigate(EXPLORE_URL)
     page.wait_for_load()
 
-    png_bytes, _b64_orig, already = fetch_qrcode(page)
+    png_bytes, already = fetch_qrcode(page)
     if already:
         browser.close()
         _output({"logged_in": True, "message": "已登录"})
         return
 
     qrcode_path = save_qrcode_to_file(png_bytes)
-    image_url, login_url = make_qrcode_url(png_bytes)
-
-    _open_file_if_display(qrcode_path)
 
     _save_login_tab(page.target_id, args.port)
     _clear_session_tab(args.port)
     browser.close()
-    result: dict = {
-        "logged_in": False,
-        "login_method": "qrcode",
-        "qrcode_path": qrcode_path,
-        "qrcode_image_url": image_url,
-        "message": (
-            "验证码发送受限，已切换为二维码登录，请扫码。"
-            "扫码后运行 wait-login 等待登录结果。"
-        ),
-    }
-    if login_url:
-        result["qr_login_url"] = login_url
-    _output(result, exit_code=1)
+    _output(
+        {
+            "logged_in": False,
+            "login_method": "qrcode",
+            "qrcode_path": qrcode_path,
+            "message": "验证码发送受限，已切换为二维码登录，请扫码。"
+            "扫码后运行 wait-login 等待登录结果。",
+        },
+        exit_code=1,
+    )
 
 
 # ========== 子命令实现 ==========
@@ -299,46 +312,33 @@ def _qrcode_fallback(browser, page, args: argparse.Namespace) -> None:
 def cmd_check_login(args: argparse.Namespace) -> None:
     """检查登录状态。未登录时自动获取二维码，省去单独调 get-qrcode 的一轮通信。
 
-    直接调 fetch_qrcode 一步完成：导航 + 登录检查 + 二维码获取，
+    直接调 fetch_qrcode 一步完成：导航 + 登录检查 + 二维码截图，
     不再经过 check_login_status 避免重复导航和等待。
     """
-    from xhs.login import (
-        fetch_qrcode,
-        make_qrcode_url,
-        save_qrcode_to_file,
-    )
+    from xhs.login import fetch_qrcode, save_qrcode_to_file
 
     browser, page = _connect(args)
     try:
-        png_bytes, _b64_orig, already = fetch_qrcode(page)
+        png_bytes, already = fetch_qrcode(page)
         if already:
             _output({"logged_in": True}, exit_code=0)
             return
 
         qrcode_path = save_qrcode_to_file(png_bytes)
-        image_url, login_url = make_qrcode_url(png_bytes)
 
         # 记录 login tab + 清除 session tab
         _save_login_tab(page.target_id, args.port)
         _clear_session_tab(args.port)
-
-        _open_file_if_display(qrcode_path)
 
         from chrome_launcher import has_display
 
         result: dict = {
             "logged_in": False,
             "qrcode_path": qrcode_path,
-            "qrcode_image_url": image_url,
         }
-        if login_url:
-            result["qr_login_url"] = login_url
         if has_display():
             result["login_method"] = "qrcode"
-            result["hint"] = (
-                "未登录，二维码已自动生成。"
-                "扫码后运行 wait-login 等待登录结果"
-            )
+            result["hint"] = "未登录，二维码已自动生成。扫码后运行 wait-login 等待登录结果"
         else:
             result["login_method"] = "both"
             result["hint"] = (
@@ -359,13 +359,12 @@ def cmd_login(args: argparse.Namespace) -> None:
 
     browser, page = _connect(args)
     try:
-        png_bytes, _b64, already = fetch_qrcode(page)
+        png_bytes, already = fetch_qrcode(page)
         if already:
             _output({"logged_in": True, "message": "已登录"})
             return
 
         qrcode_path = save_qrcode_to_file(png_bytes)
-        _open_file_if_display(qrcode_path)
         print(
             json.dumps(
                 {"qrcode_path": qrcode_path, "message": "请扫码登录"},
@@ -408,10 +407,7 @@ def cmd_phone_login(args: argparse.Namespace) -> None:
             json.dumps(
                 {
                     "status": "code_sent",
-                    "message": (
-                        f"验证码已发送至 "
-                        f"{args.phone[:3]}****{args.phone[-4:]}"
-                    ),
+                    "message": (f"验证码已发送至 {args.phone[:3]}****{args.phone[-4:]}"),
                 },
                 ensure_ascii=False,
             ),
@@ -454,20 +450,14 @@ def cmd_phone_login(args: argparse.Namespace) -> None:
 def cmd_get_qrcode(args: argparse.Namespace) -> None:
     """获取登录二维码并立即返回（非阻塞）。
 
-    从登录弹窗的二维码 img 元素读取图片（data URL 或网络 URL），
-    保存为本地 PNG 文件后立即退出。Chrome tab 保持打开，QR 会话继续有效。
-    调用方收到 qrcode_data_url 后直接内嵌到对话窗口显示；同时浏览器窗口（GUI 环境）
-    也会显示二维码，用户可选择扫任意一个。
+    通过 CDP 截图二维码元素，保存为本地 PNG 文件后立即退出。
+    Chrome tab 保持打开，QR 会话继续有效。
     """
-    from xhs.login import (
-        fetch_qrcode,
-        make_qrcode_url,
-        save_qrcode_to_file,
-    )
+    from xhs.login import fetch_qrcode, save_qrcode_to_file
 
     browser, page = _connect(args)
 
-    png_bytes, _b64_orig, already = fetch_qrcode(page)
+    png_bytes, already = fetch_qrcode(page)
     if already:
         browser.close_page(page)
         browser.close()
@@ -475,9 +465,6 @@ def cmd_get_qrcode(args: argparse.Namespace) -> None:
         return
 
     qrcode_path = save_qrcode_to_file(png_bytes)
-    image_url, login_url = make_qrcode_url(png_bytes)
-
-    _open_file_if_display(qrcode_path)
 
     # 记录 login tab，供 wait-login 精确 reconnect
     _save_login_tab(page.target_id, args.port)
@@ -486,15 +473,12 @@ def cmd_get_qrcode(args: argparse.Namespace) -> None:
 
     # 只断开 CDP 连接，不关闭 tab——QR 会话保持
     browser.close()
-    result: dict = {
-        "qrcode_path": qrcode_path,
-        "qrcode_image_url": image_url,
-        "message": "二维码已生成，请扫码登录。"
-        "扫码后运行 wait-login 等待登录结果。",
-    }
-    if login_url:
-        result["qr_login_url"] = login_url
-    _output(result)
+    _output(
+        {
+            "qrcode_path": qrcode_path,
+            "message": "二维码已生成，请扫码登录。扫码后运行 wait-login 等待登录结果。",
+        }
+    )
 
 
 def cmd_wait_login(args: argparse.Namespace) -> None:
@@ -513,7 +497,9 @@ def cmd_wait_login(args: argparse.Namespace) -> None:
         _output(
             {
                 "logged_in": success,
-                "message": "登录成功" if success else "等待超时，请重新运行 get-qrcode 获取新二维码",
+                "message": "登录成功"
+                if success
+                else "等待超时，请重新运行 get-qrcode 获取新二维码",
             },
             exit_code=0 if success else 2,
         )
@@ -540,13 +526,15 @@ def cmd_send_code(args: argparse.Namespace) -> None:
         _save_login_tab(page.target_id, args.port)
         # 清除 session tab 引用——隔离登录表单，防止其他命令复用并关闭/导航该 tab
         _clear_session_tab(args.port)
-        _output({
-            "status": "code_sent",
-            "message": (
-                f"验证码已发送至 {args.phone[:3]}****{args.phone[-4:]}，"
-                "请运行 verify-code --code <验证码>"
-            ),
-        })
+        _output(
+            {
+                "status": "code_sent",
+                "message": (
+                    f"验证码已发送至 {args.phone[:3]}****{args.phone[-4:]}，"
+                    "请运行 verify-code --code <验证码>"
+                ),
+            }
+        )
     except RateLimitError:
         # 频率限制——直接切换二维码登录
         logger.info("验证码发送受限，切换为二维码登录")

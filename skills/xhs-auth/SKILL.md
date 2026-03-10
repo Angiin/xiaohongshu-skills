@@ -89,32 +89,28 @@ python scripts/cli.py check-login
 
 输出解读：
 - `"logged_in": true` → 已登录，可执行后续操作。
-- `"logged_in": false` + `"login_method": "qrcode"` → 有界面环境，走方式 A（二维码）。输出自动包含 `qrcode_image_url` 和 `qrcode_path`。
-- `"logged_in": false` + `"login_method": "both"` → 无界面服务器，输出自动包含二维码，**询问用户选方式 A（二维码）或方式 B（手机验证码）**。
+- `"logged_in": false` + `"login_method": "qrcode"` → 有界面环境，走方式 A（二维码）。输出包含 `qrcode_path`（本地截图文件）。
+- `"logged_in": false` + `"login_method": "both"` → 无界面服务器，输出包含二维码截图，**询问用户选方式 A（二维码）或方式 B（手机验证码）**。
 
 ### 第二步：根据输出选择登录方式
 
 #### 方式 A：二维码登录（所有平台通用）
 
-> `check-login` 未登录时会自动返回二维码（`qrcode_image_url` + `qrcode_path`），无需单独调 `get-qrcode`。
+> `check-login` 未登录时会自动截图二维码并返回 `qrcode_path`，无需单独调 `get-qrcode`。
 
-**第一步** — 从 `check-login` 返回的 JSON 取 `qrcode_image_url`，在回复中展示：
+**第一步** — 用 Read 工具读取 `qrcode_path` 指向的本地图片文件，展示给用户：
 
 ```
-请使用小红书 App 扫描以下二维码登录：
+以下是登录二维码，请使用小红书 App 扫码登录：
 
-![小红书登录二维码]({qrcode_image_url})
-
-您也可以在手机浏览器中直接访问此链接完成登录：
-{qr_login_url}
+（使用 Read 工具读取 {qrcode_path} 文件，图片会自动展示在对话中）
 ```
 
 > **展示规范（必须全部遵守）**：
-> 1. 展示二维码图片（`qrcode_image_url`）。
-> 2. 如果输出含 `qr_login_url`，**必须**同时展示该链接并提示用户"也可以在手机浏览器中直接访问此链接完成登录"。此链接是小红书官方登录地址（`xiaohongshu.com` 域名），既方便用户直接点击，也增加对二维码的信任感。
-> 3. **禁止**省略 `qr_login_url`，即使已展示了二维码图片。
-
-图片内嵌在对话窗口，用户可以扫码或直接访问链接登录。
+> 1. 使用 **Read 工具**读取 `qrcode_path` 指向的 PNG 文件。Claude Code 会自动将图片内容展示在对话中。
+> 2. 读取图片后，告知用户"以下是登录二维码，请使用小红书 App 扫码登录"。
+> 3. **严格禁止**将 `data:image/png;base64,...` 字符串直接输出到对话中。
+> 4. **严格禁止**用 markdown `![](...)` 语法引用本地文件路径（不会渲染）。
 
 **第二步** — 等待登录完成（**单次调用，无需轮询**）：
 
@@ -145,7 +141,7 @@ python scripts/cli.py send-code --phone <用户确认的手机号>
 - 自动填写手机号、勾选用户协议、点击"获取验证码"。
 - Chrome 页面保持打开，等待下一步。
 - 正常输出：`{"status": "code_sent", "message": "..."}`
-- **频率限制**：自动切换为二维码登录，输出含 `qrcode_image_url`。告知用户"验证码发送受限，已切换为二维码登录"，按方式 A 的展示规范展示二维码，然后运行 `wait-login`。
+- **频率限制**：自动切换为二维码登录，输出含 `qrcode_image_url`。告知用户"验证码发送受限，已切换为二维码登录"，按方式 A 的展示规范展示登录二维码，然后运行 `wait-login`。
 
 **第二步** — 向用户询问验证码，然后提交登录：
 
@@ -204,6 +200,10 @@ python scripts/cli.py remove-account --name personal     # 删除账号
 ## 失败处理
 
 - **Chrome 未找到**：提示用户安装 Google Chrome 或设置 `CHROME_BIN` 环境变量。
+- **Chrome 启动崩溃**（Linux/Docker）：错误信息含 `Chrome 进程意外退出 (exit_code=...)`。
+  - `exit_code` 为负数（如 -11）：通常是沙盒权限问题。提示用户确认 Docker 环境已配置 `--cap-add=SYS_ADMIN` 或使用 `--security-opt seccomp=unconfined`。
+  - `/dev/shm` 不足：建议 `docker run --shm-size=256m` 或挂载 tmpfs。
+  - 脚本已自动添加 `--no-sandbox`、`--disable-dev-shm-usage`、`--disable-gpu` 等参数，无需手动配置。
 - **登录弹窗未出现**：等待 15 秒超时，重试 `send-code`。
 - **验证码错误**：输出包含 `"logged_in": false`，重新运行 `verify-code --code <新验证码>`。
 - **二维码超时**：重新执行 `get-qrcode` 获取新二维码，再运行 `wait-login`。

@@ -147,6 +147,14 @@ def launch_chrome(
     if headless:
         args.append("--headless=new")
 
+    if sys.platform == "linux":
+        args += [
+            "--no-sandbox",  # Docker/低权限环境必需
+            "--disable-dev-shm-usage",  # /dev/shm 不足时用 /tmp 替代
+            "--disable-gpu",  # 无 GPU 环境避免初始化崩溃
+            "--disable-software-rasterizer",
+        ]
+
     # 代理
     proxy = os.getenv("XHS_PROXY")
     if proxy:
@@ -162,7 +170,7 @@ def launch_chrome(
     _chrome_process = process
 
     # 等待 Chrome 准备就绪
-    _wait_for_chrome(port)
+    _wait_for_chrome(port, process=process)
     return process
 
 
@@ -264,12 +272,17 @@ def ensure_chrome(
 
     try:
         launch_chrome(
-            port=port, headless=headless, user_data_dir=user_data_dir, chrome_bin=chrome_bin,
+            port=port,
+            headless=headless,
+            user_data_dir=user_data_dir,
+            chrome_bin=chrome_bin,
         )
         return is_port_open(port)
     except FileNotFoundError as e:
         logger.error("启动 Chrome 失败: %s", e)
         return False
+    except RuntimeError:
+        raise
 
 
 def restart_chrome(
@@ -300,15 +313,34 @@ def restart_chrome(
     )
 
 
-def _wait_for_chrome(port: int, timeout: float = 15.0) -> None:
-    """等待 Chrome 调试端口就绪（TCP 级检测）。"""
+def _wait_for_chrome(
+    port: int,
+    timeout: float = 15.0,
+    process: subprocess.Popen | None = None,
+) -> None:
+    """等待 Chrome 调试端口就绪（TCP 级检测）。
+
+    如果传入 process，轮询中检测进程是否提前退出（崩溃），立即抛出错误。
+    """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if is_port_open(port):
             logger.info("Chrome 已就绪 (port=%d)", port)
             return
+        # 检测进程是否已退出（早期崩溃）
+        if process is not None and process.poll() is not None:
+            exit_code = process.returncode
+            hint = ""
+            if sys.platform == "linux":
+                hint = (
+                    "。Linux 环境请确认: "
+                    "1) 已安装 Chrome/Chromium; "
+                    "2) 运行用户有权限; "
+                    "3) Docker 中需要 --no-sandbox（已自动添加）"
+                )
+            raise RuntimeError(f"Chrome 进程意外退出 (exit_code={exit_code}){hint}")
         time.sleep(0.5)
-    logger.warning("等待 Chrome 就绪超时 (port=%d)", port)
+    raise RuntimeError(f"等待 Chrome 就绪超时 (port={port})，Chrome 可能未正常启动")
 
 
 def _find_pids_by_port(port: int) -> list[int]:
